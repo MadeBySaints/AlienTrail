@@ -1,3 +1,2 @@
 @echo off
-python AlienTrail.py
-pause
+start "" pythonw AlienTrail.py
