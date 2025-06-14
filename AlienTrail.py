@@ -22,22 +22,27 @@ class GameConfig:
     CREW_HIRE_COST = 25
     CREW_HIRE_CHANCE = 0.6
     CREW_HIRE_MAX = 8
-
-    # Wreckage exploration settings
-    WRECKAGE_SUCCESS_RATE = 0.5  # 50% chance of success
-    WRECKAGE_DAMAGE = (10, 25)   # Min and max damage if wreckage explodes
-    WRECKAGE_COOLDOWN = 45       # Cooldown in seconds
     
-    # Action cooldowns in seconds
+    # Cooldown timers (in seconds)
+    COOLDOWN_SEARCH_FOOD = 30
+    COOLDOWN_REFUEL = 30
+    COOLDOWN_HIRE_CREW = 60
+    COOLDOWN_EXPLORE_WRECKAGE = 45
+    COOLDOWN_REST = 20
+    COOLDOWN_TRADE = 30
+    COOLDOWN_REPAIR_SHIP = 45
+    COOLDOWN_SELL_ITEMS = 15
+    
+    # Action cooldowns dictionary
     COOLDOWNS = {
-        "search_food": 30,
-        "refuel": 30,
-        "hire_crew": 60,
-        "explore_wreckage": WRECKAGE_COOLDOWN,
-        "rest": 20,
-        "trade": 30,
-        "repair_ship": 45,
-        "sell_items": 15
+        "search_food": COOLDOWN_SEARCH_FOOD,
+        "refuel": COOLDOWN_REFUEL,
+        "hire_crew": COOLDOWN_HIRE_CREW,
+        "explore_wreckage": COOLDOWN_EXPLORE_WRECKAGE,
+        "rest": COOLDOWN_REST,
+        "trade": COOLDOWN_TRADE,
+        "repair_ship": COOLDOWN_REPAIR_SHIP,
+        "sell_items": COOLDOWN_SELL_ITEMS
     }
     
     # Food search risks
@@ -59,6 +64,10 @@ class GameConfig:
     TRAVEL_FOOD_COST = (5, 20)
     TRAVEL_DISTANCE = (50, 150)
     
+    # Wreckage exploration
+    WRECKAGE_SUCCESS_RATE = 0.5
+    WRECKAGE_DAMAGE = (10, 25)
+    
     # Credit earning
     CREDITS_FROM_ENEMIES = (5, 25)
     CREDITS_FROM_SALVAGE = (10, 50)
@@ -67,7 +76,7 @@ class GameConfig:
         "quantum battery": 25,
         "dark matter shard": 30,
         "nano medkit": 35,
-        "ship parts": 100
+        "ship parts": 20
     }
     RANDOM_CREDITS_CHANCE = 0.2
     
@@ -86,7 +95,7 @@ class GameConfig:
         "quantum battery": 0.3,
         "dark matter shard": 0.25,
         "nano medkit": 0.15,
-        "ship parts": 0.25
+        "ship parts": 0.1
     }
     
     # Trading
@@ -100,7 +109,6 @@ class GameConfig:
         {"name": "Space Pirate", "damage": (10, 25), "drop": "alien artifact", "weight": 3},
         {"name": "Void Beast", "damage": (15, 30), "drop": "dark matter shard", "weight": 2},
         {"name": "Malfunctioning Drone", "damage": (5, 20), "drop": "quantum battery", "weight": 4},
-        {"name": "Stranded Mining Vessel", "damage": (0, 0), "drop": "ship parts", "weight": 4}
     ]
 
 class AlienTrailGame:
@@ -108,6 +116,7 @@ class AlienTrailGame:
         self.root = root
         self.root.title("Alien Trail")
         self.last_action_times = {}
+        self.game_active = True
         self.configure_styles()
         self.create_widgets()
         self.restart_game()
@@ -125,6 +134,14 @@ class AlienTrailGame:
         }
         
         self.root.after(1000, self.update_cooldowns)
+
+    def is_game_active(self):
+        """Check if game should continue"""
+        return (self.fuel > 0 
+                and self.crew > 0 
+                and self.ship_integrity > 0 
+                and self.distance > 0
+                and self.game_active)
 
     def configure_styles(self):
         self.title_font = tkfont.Font(family="Courier", size=12, weight="bold")
@@ -199,6 +216,13 @@ class AlienTrailGame:
             self.button_frame.grid_columnconfigure(i, weight=1)
 
     def update_cooldowns(self):
+        """Update button states and cooldown timers"""
+        if not self.is_game_active():
+            for btn in self.buttons.values():
+                if btn["text"] != "Restart Game":
+                    btn.config(state=tk.DISABLED, fg=self.colors["disabled"])
+            return
+            
         for action_name, cooldown in GameConfig.COOLDOWNS.items():
             btn_name = self.action_to_button.get(action_name)
             if btn_name and btn_name in self.buttons:
@@ -225,6 +249,8 @@ class AlienTrailGame:
         return max(0, cooldown - elapsed)
 
     def can_perform_action(self, action_name):
+        if not self.is_game_active():
+            return False
         remaining = self.check_cooldown(action_name)
         if remaining > 0:
             return False
@@ -286,6 +312,7 @@ class AlienTrailGame:
 
     def restart_game(self):
         self._restarting = True
+        self.game_active = True
         
         self.crew = GameConfig.STARTING_CREW
         self.fuel = GameConfig.STARTING_FUEL
@@ -310,12 +337,16 @@ class AlienTrailGame:
         self.update_status()
 
     def game_over(self, msg):
+        self.game_active = False
         messagebox.showinfo("GAME OVER", msg)
-        self.restart_game()
+        self.display(f"GAME OVER: {msg}\n\nPress 'Restart Game' to play again.")
 
     def travel(self):
+        if not self.is_game_active():
+            return
+            
         if self.fuel <= 0:
-            self.game_over("You're stranded in space!")
+            self.game_over("You're stranded in space with no fuel!")
             return
         
         fuel_cost = random.randint(*GameConfig.TRAVEL_FUEL_COST)
@@ -325,6 +356,10 @@ class AlienTrailGame:
         self.distance -= travel_distance
         self.fuel = max(0, self.fuel - fuel_cost)
         self.food = max(0, self.food - food_cost)
+        
+        if self.fuel <= 0:
+            self.game_over("You've run out of fuel and are stranded in space!")
+            return
         
         if random.random() < GameConfig.RANDOM_CREDITS_CHANCE:
             found_credits = random.randint(5, 20)
@@ -346,6 +381,9 @@ class AlienTrailGame:
             self.game_over("Your ship has been destroyed!")
 
     def rest(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("rest"):
             return
             
@@ -370,6 +408,9 @@ class AlienTrailGame:
         self.display("Current Supplies and Inventory:")
 
     def search_food(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("search_food"):
             return
             
@@ -390,6 +431,13 @@ class AlienTrailGame:
         self.display(f"You found {actual_gain} units of food.")
 
     def refuel(self):
+        if not self.is_game_active():
+            return
+            
+        if self.fuel <= 0:
+            self.display("Too late! You're already stranded in space!")
+            return
+            
         if not self.can_perform_action("refuel"):
             return
             
@@ -403,6 +451,9 @@ class AlienTrailGame:
         self.display(f"You collected {actual_gain} units of fuel.")
 
     def hire_crew(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("hire_crew"):
             return
             
@@ -423,6 +474,9 @@ class AlienTrailGame:
                        "You keep your credits.")
 
     def explore_wreckage(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("explore_wreckage"):
             return
             
@@ -442,6 +496,9 @@ class AlienTrailGame:
                 self.game_over("Your ship has been destroyed!")
 
     def trade(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("trade"):
             return
             
@@ -459,6 +516,9 @@ class AlienTrailGame:
                    f"+{GameConfig.TRADE_REPAIR_GAIN}% ship integrity")
 
     def sell_items(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("sell_items"):
             return
             
@@ -484,6 +544,9 @@ class AlienTrailGame:
             self.display("You have no sellable items!")
 
     def repair_ship(self):
+        if not self.is_game_active():
+            return
+            
         if not self.can_perform_action("repair_ship"):
             return
             
