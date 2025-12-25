@@ -3,6 +3,220 @@ from tkinter import messagebox
 import random
 from tkinter import font as tkfont
 import time
+import numpy as np
+import wave
+import threading
+import os
+import platform
+import subprocess
+
+AUDIO_AVAILABLE = True
+try:
+    import pygame
+    pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+    AUDIO_METHOD = 'pygame'
+except ImportError:
+    try:
+        if platform.system() == 'Windows':
+            import winsound
+            AUDIO_METHOD = 'winsound'
+        else:
+            AUDIO_AVAILABLE = False
+            AUDIO_METHOD = None
+    except ImportError:
+        AUDIO_AVAILABLE = False
+        AUDIO_METHOD = None
+
+class ChiptunePlayer:
+    def __init__(self):
+        self.playing = False
+        self.thread = None
+        self.temp_file = "space_theme.wav"
+        self.audio_generated = False
+        
+    def generate_chiptune(self):
+        """Generate a complex space-themed chiptune"""
+        sample_rate = 44100
+        duration = 32  # Extended to 32 seconds for more complex melody
+        
+        # More complex sci-fi melody with multiple sections
+        # Section 1: Mysterious opening (Am progression)
+        section1_melody = [
+            440, 523, 659, 880, 659, 523, 440, 392,  # A minor ascend/descend
+            440, 523, 659, 784, 659, 523, 587, 523,  # Variation
+        ]
+        
+        # Section 2: Building tension (Dm - Am progression)
+        section2_melody = [
+            587, 698, 880, 1047, 880, 698, 659, 587,  # D minor
+            523, 659, 784, 880, 784, 659, 698, 659,   # Transition
+        ]
+        
+        # Section 3: Action theme (C - G - Am - F)
+        section3_melody = [
+            523, 659, 784, 1047, 784, 659, 523, 659,  # C major bright
+            392, 494, 587, 784, 587, 494, 523, 494,   # G major
+            440, 523, 659, 880, 659, 523, 698, 659,   # Am
+            349, 440, 523, 698, 523, 440, 392, 349,   # F major
+        ]
+        
+        # Section 4: Resolution (back to Am with flourish)
+        section4_melody = [
+            880, 1047, 1319, 1760, 1319, 1047, 880, 784,  # High Am
+            659, 784, 880, 1047, 880, 784, 659, 523,       # Descend
+            440, 523, 659, 523, 440, 392, 440, 330,        # Final resolution
+            440, 330, 440, 330, 440, 523, 659, 440,        # Ending phrase
+        ]
+        
+        # Combine all sections
+        melody = section1_melody + section2_melody + section3_melody + section4_melody
+        
+        # Complex bass line with more movement
+        section1_bass = [220, 220, 220, 220, 220, 220, 220, 196] * 2
+        section2_bass = [147, 147, 147, 147, 220, 220, 220, 220] * 2
+        section3_bass = [
+            131, 131, 131, 131, 131, 131, 131, 131,  # C
+            196, 196, 196, 196, 196, 196, 196, 196,  # G
+            220, 220, 220, 220, 220, 220, 220, 220,  # A
+            175, 175, 175, 175, 175, 175, 175, 175,  # F
+        ]
+        section4_bass = [220, 220, 220, 220] * 8 + [220, 165, 220, 165, 220, 220, 220, 220] * 2
+        
+        bass = section1_bass + section2_bass + section3_bass + section4_bass
+        
+        # Arpeggiated accompaniment pattern
+        arp_pattern = [1.0, 1.5, 2.0, 3.0]  # Multipliers for chord tones
+        
+        note_duration = duration / len(melody)
+        samples = []
+        
+        for i, (m_freq, b_freq) in enumerate(zip(melody, bass)):
+            t = np.linspace(0, note_duration, int(sample_rate * note_duration))
+            
+            # Main melody with square wave (classic chiptune)
+            melody_wave = np.sign(np.sin(2 * np.pi * m_freq * t)) * 0.35
+            
+            # Bass with deeper square wave
+            bass_wave = np.sign(np.sin(2 * np.pi * b_freq * t)) * 0.3
+            
+            # Add harmonics for sci-fi shimmer
+            harmonic1 = np.sign(np.sin(2 * np.pi * (m_freq * 2) * t)) * 0.15
+            harmonic2 = np.sin(2 * np.pi * (m_freq * 4) * t) * 0.08  # Softer sine for brightness
+            
+            # Arpeggiated chord accompaniment (subtle)
+            arp_multiplier = arp_pattern[i % len(arp_pattern)]
+            arp_freq = b_freq * arp_multiplier
+            arp_wave = np.sin(2 * np.pi * arp_freq * t) * 0.12
+            
+            # Add subtle vibrato to melody for sci-fi feel
+            vibrato_freq = 5  # Hz
+            vibrato_amount = 0.003
+            vibrato = 1 + vibrato_amount * np.sin(2 * np.pi * vibrato_freq * t)
+            melody_wave = melody_wave * vibrato
+            
+            # Combine all layers
+            combined = melody_wave + bass_wave + harmonic1 + harmonic2 + arp_wave
+            
+            # Dynamic envelope based on section
+            envelope = np.ones_like(t)
+            fade_samples = int(sample_rate * 0.015)  # 15ms fade
+            
+            # Smooth attack and release
+            envelope[:fade_samples] = np.linspace(0, 1, fade_samples) ** 2
+            envelope[-fade_samples:] = (np.linspace(1, 0, fade_samples)) ** 2
+            
+            combined *= envelope
+            samples.extend(combined)
+        
+        # Normalize with headroom
+        samples = np.array(samples)
+        samples = samples / np.max(np.abs(samples)) * 0.65
+        
+        return samples, sample_rate
+    
+    def save_wav(self, samples, sample_rate):
+        """Save samples as WAV file"""
+        samples_int = (samples * 32767).astype(np.int16)
+        
+        with wave.open(self.temp_file, 'w') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(samples_int.tobytes())
+    
+    def play_loop(self):
+        """Play the audio in a loop using pygame"""
+        if not AUDIO_AVAILABLE or AUDIO_METHOD != 'pygame':
+            return
+            
+        # Generate audio file once if not already done
+        if not self.audio_generated:
+            samples, sample_rate = self.generate_chiptune()
+            self.save_wav(samples, sample_rate)
+            self.audio_generated = True
+        
+        # Load and play with pygame
+        try:
+            pygame.mixer.music.load(self.temp_file)
+            pygame.mixer.music.play(-1)  # -1 means loop indefinitely
+            
+            # Keep thread alive while playing
+            while self.playing:
+                threading.Event().wait(0.1)
+                
+        except Exception as e:
+            print(f"Audio playback error: {e}")
+    
+    def play_loop_winsound(self):
+        """Fallback for Windows without pygame"""
+        if not self.audio_generated:
+            samples, sample_rate = self.generate_chiptune()
+            self.save_wav(samples, sample_rate)
+            self.audio_generated = True
+        
+        while self.playing:
+            try:
+                winsound.PlaySound(self.temp_file, winsound.SND_FILENAME)
+            except:
+                break
+    
+    def start(self):
+        """Start playing music in background thread"""
+        if not AUDIO_AVAILABLE:
+            print("Audio not available on this system")
+            return
+            
+        if not self.playing:
+            self.playing = True
+            
+            if AUDIO_METHOD == 'pygame':
+                self.thread = threading.Thread(target=self.play_loop, daemon=True)
+            else:
+                self.thread = threading.Thread(target=self.play_loop_winsound, daemon=True)
+                
+            self.thread.start()
+    
+    def stop(self):
+        """Stop playing music immediately"""
+        self.playing = False
+        
+        if AUDIO_METHOD == 'pygame':
+            try:
+                pygame.mixer.music.stop()
+            except:
+                pass
+        
+        if self.thread:
+            self.thread.join(timeout=0.5)
+    
+    def cleanup(self):
+        """Clean up resources when done"""
+        self.stop()
+        try:
+            if os.path.exists(self.temp_file):
+                os.remove(self.temp_file)
+        except:
+            pass
 
 class GameConfig:
     # Game configuration
@@ -117,6 +331,9 @@ class AlienTrailGame:
         self.root.title("Alien Trail")
         self.last_action_times = {}
         self.game_active = True
+        self.music_player = ChiptunePlayer()
+        self.music_enabled = True
+    
         self.configure_styles()
         self.create_widgets()
         self.restart_game()
@@ -158,6 +375,17 @@ class AlienTrailGame:
             "highlight": "#00ffff",
             "disabled": "#555555"
         }
+    
+    def toggle_music(self):
+        """Toggle background music on/off"""
+        if self.music_enabled:
+            self.music_player.stop()
+            self.music_enabled = False
+            self.display("🔇 Music disabled")
+        else:
+            self.music_player.start()
+            self.music_enabled = True
+            self.display("🔊 Music enabled")
 
     def create_widgets(self):
         self.main_frame = tk.Frame(self.root, bg=self.colors["bg"])
@@ -193,6 +421,7 @@ class AlienTrailGame:
             ("Trade", self.trade),
             ("Sell Items", self.sell_items),
             ("Repair Ship", self.repair_ship),
+            ("Toggle Music", self.toggle_music),
             ("Restart Game", self.restart_game)
         ]
         
@@ -335,6 +564,9 @@ class AlienTrailGame:
         
         del self._restarting
         self.update_status()
+
+        if self.music_enabled:
+            self.music_player.start()
 
     def game_over(self, msg):
         self.game_active = False
